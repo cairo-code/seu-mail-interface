@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './App.css';
 
 // API Configuration
-const DEFAULT_SERVER = '89.168.74.94';
+const DEFAULT_SERVER = 'seu-mail-server-api.cairo-code.site';
 const HTTPS_PORT = 443;
 
 const TABS = {
@@ -477,7 +477,6 @@ const App = () => {
             onClick={() => setActiveTab(TABS.SEND)}
           >
             Send Email
- Humanos
           </button>
           <button
             className={`px-4 py-2 rounded ${activeTab === TABS.SENT ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}
