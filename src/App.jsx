@@ -2,15 +2,8 @@ import React, { useEffect, useState } from 'react';
 import './App.css';
 
 // API Configuration
-const isProduction = window.location.hostname !== 'localhost';
-
-const API_URL = isProduction
-  ? 'https://seu-mail-server-api.cairo-code.site'
-  : 'http://localhost:3001';
-
-const WS_URL = isProduction
-  ? 'wss://seu-mail-server-api.cairo-code.site'
-  : 'ws://localhost:3001';
+const API_URL = 'https://89.168.74.94';
+const WS_URL = 'wss://89.168.74.94';
 
 const TABS = {
   SEND: 'Send Email',

@@ -2,33 +2,25 @@ import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import fs from 'fs';
+import https from 'https';
 import { exec } from 'child_process';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
 import { WebSocketServer, WebSocket } from 'ws';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
-import http from 'http';
 
 const app = express();
-const PORT = 3001;
+const PORT = 443;
 const upload = multer({ dest: 'uploads/' });
 
-// Configure CORS for Vercel deployment
-const corsOptions = {
-  origin: [
-    'https://seu-mail-interface.vercel.app',
-    'https://seu-mail-interface-git-main-freddys-projects.vercel.app',
-    'https://seu-mail-interface-freddys-projects.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:5173'
-  ],
-  methods: ['GET', 'POST'],
+// CORS: Allow all origins with credentials
+app.use(cors({
+  origin: true, // Reflects the request origin
   credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
-};
-
-app.use(cors(corsOptions));
+}));
 
 // Enhanced logging: log to file as well as console
 const LOG_FILE_PATH = './logs/server.log';
@@ -134,45 +126,33 @@ const transporter = nodemailer.createTransport({
 // Load users.json synchronously
 const users = JSON.parse(fs.readFileSync('./users.json', 'utf8'));
 
-// Start HTTP server only (Nginx will handle HTTPS)
-let server;
-try {
-  server = http.createServer(app).listen(PORT, () => {
-    log(`HTTP Server running on http://localhost:${PORT}`);
-    log('Production HTTPS is handled by Nginx reverse proxy.');
-  });
-} catch (err) {
-  log(`Failed to start server: ${err.message}`, 'ERROR');
-  process.exit(1);
-}
+// SSL options
+const sslOptions = {
+  key: fs.readFileSync('/etc/letsencrypt/live/seu-mail-server-api.cairo-code.site/privkey.pem'),
+  cert: fs.readFileSync('/etc/letsencrypt/live/seu-mail-server-api.cairo-code.site/fullchain.pem')
+};
 
-// Initialize WebSocket server with origin check
+// Start HTTPS server
+const server = https.createServer(sslOptions, app).listen(PORT, () => {
+  console.log(`HTTPS Server running on port ${PORT}`);
+});
+
+// Initialize WebSocket server
 let wss;
 try {
-  wss = new WebSocketServer({ 
-    server,
-    verifyClient: ({ origin }) => {
-      const allowedOrigins = [
-        'https://seu-mail-interface.vercel.app',
-        'https://seu-mail-interface-git-main-freddys-projects.vercel.app',
-        'https://seu-mail-interface-freddys-projects.vercel.app',
-        'http://localhost:3000',
-        'http://localhost:5173'
-      ];
-      return allowedOrigins.includes(origin);
-    }
-  });
-  log('WebSocket server initialized with origin verification');
+  wss = new WebSocketServer({ server });
+  console.log('WebSocket server initialized');
 } catch (err) {
-  log(`Failed to initialize WebSocket server: ${err.message}`, 'ERROR');
+  console.error(`Failed to initialize WebSocket server: ${err.message}`);
   process.exit(1);
 }
 
 // WebSocket event handlers
 wss.on('connection', (ws, req) => {
-  log(`New WebSocket client connected from ${req.socket.remoteAddress}`);
+  log(`[WS-CONNECT] New WebSocket client from ${req.socket.remoteAddress}`);
   
   ws.on('message', (message) => {
+    log(`[WS-MESSAGE] ${req.socket.remoteAddress}: ${message}`);
     try {
       const data = message.toString();
       log(`Received WebSocket message: ${data}`);
@@ -183,16 +163,16 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('error', (error) => {
-    log(`WebSocket error: ${error.message}`, 'ERROR');
+    log(`[WS-ERROR] ${req.socket.remoteAddress}: ${error.message}`);
   });
 
   ws.on('close', (code, reason) => {
-    log(`WebSocket client disconnected (code: ${code}, reason: ${reason})`);
+    log(`[WS-CLOSE] ${req.socket.remoteAddress} (code: ${code}, reason: ${reason})`);
   });
 });
 
 wss.on('error', (error) => {
-  log(`WebSocket server error: ${error.message}`, 'ERROR');
+  log(`[WS-SERVER-ERROR] ${error.message}`);
 });
 
 // Broadcast function for WebSocket messages
@@ -213,6 +193,10 @@ function broadcastLog(message) {
 // Middleware to log all HTTP requests
 app.use(express.json());
 app.use((req, res, next) => {
+  log(`[REQ-START] ${req.method} ${req.url} from ${req.ip}`);
+  res.on('finish', () => {
+    log(`[REQ-END] ${req.method} ${req.url} from ${req.ip} - Status: ${res.statusCode}`);
+  });
   const logMsg = `HTTP ${req.method} ${req.url} from ${req.ip}`;
   log(logMsg);
   broadcastLog(logMsg);
