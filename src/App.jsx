@@ -3,7 +3,6 @@ import './App.css';
 
 // API Configuration
 const DEFAULT_SERVER = '89.168.74.94';
-const HTTP_PORT = 80;
 const HTTPS_PORT = 443;
 
 const TABS = {
@@ -15,8 +14,6 @@ const TABS = {
 const App = () => {
   const [logs, setLogs] = useState([]);
   const [wsStatus, setWsStatus] = useState('disconnected');
-  const [connectionProtocol, setConnectionProtocol] = useState('https');
-  const [wsProtocol, setWsProtocol] = useState('wss');
   const [serverAddress, setServerAddress] = useState(DEFAULT_SERVER);
   const [emails, setEmails] = useState([]);
   const [subject, setSubject] = useState('');
@@ -36,10 +33,12 @@ const App = () => {
   const [loadingArchives, setLoadingArchives] = useState(false);
   const [expandedEmail, setExpandedEmail] = useState(null);
   const [showConfig, setShowConfig] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
 
   // Dynamic URLs
-  const getApiUrl = () => `${connectionProtocol}://${serverAddress}:${connectionProtocol === 'https' ? HTTPS_PORT : HTTP_PORT}`;
-  const getWsUrl = () => `${wsProtocol}://${serverAddress}:${wsProtocol === 'wss' ? HTTPS_PORT : HTTP_PORT}`;
+  const getApiUrl = () => `https://${serverAddress}:${HTTPS_PORT}`;
+  const getWsUrl = () => `wss://${serverAddress}:${HTTPS_PORT}`;
 
   // Logging function
   const log = (message, level = 'INFO') => {
@@ -49,9 +48,9 @@ const App = () => {
     setLogs(prev => [...prev, formattedMessage]);
   };
 
-  // Fetch email list
-  const fetchEmails = async (protocol = 'https') => {
-    const url = `${protocol}://${serverAddress}:${protocol === 'https' ? HTTPS_PORT : HTTP_PORT}/api/emails`;
+  // Fetch email list with retry
+  const fetchEmails = async () => {
+    const url = `${getApiUrl()}/api/emails`;
     log(`Fetching email list from ${url}`);
     try {
       const res = await fetch(url);
@@ -62,16 +61,18 @@ const App = () => {
       }
       setEmails(data.emails);
       log(`Fetched ${data.emails.length} emails`);
-      setConnectionProtocol(protocol);
       setError('');
+      setRetryCount(0);
     } catch (err) {
-      if (protocol === 'https') {
-        log('HTTPS failed, falling back to HTTP', 'WARNING');
-        setConnectionProtocol('http');
-        return fetchEmails('http');
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying email fetch (${retryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchEmails, 5000);
+      } else {
+        log(`Error fetching email list after ${MAX_RETRIES} retries: ${err.message}`, 'ERROR');
+        setError('Failed to load email list. Please check the server address or try again later.');
+        setRetryCount(0);
       }
-      log(`Error fetching email list: ${err.message}`, 'ERROR');
-      setError('Failed to load email list');
     }
   };
 
@@ -79,21 +80,20 @@ const App = () => {
     fetchEmails();
   }, [serverAddress]);
 
-  // WebSocket connection
+  // WebSocket connection with retry
   useEffect(() => {
     let ws;
-    const connectWebSocket = (protocol = 'wss') => {
-      const url = `${protocol}://${serverAddress}:${protocol === 'wss' ? HTTPS_PORT : HTTP_PORT}`;
+    let wsRetryCount = 0;
+    const connectWebSocket = () => {
+      const url = getWsUrl();
       log(`Attempting to connect to WebSocket at ${url}`);
       ws = new WebSocket(url);
 
       ws.onopen = () => {
-        log(`WebSocket connection established via ${protocol}`);
+        log('WebSocket connection established via WSS');
         setWsStatus('connected');
-        setWsProtocol(protocol);
-        if (protocol === 'ws') {
-          setError('Using insecure WebSocket (WS). Data may be unencrypted.');
-        }
+        wsRetryCount = 0;
+        setError('');
       };
 
       ws.onmessage = (event) => {
@@ -113,11 +113,14 @@ const App = () => {
       ws.onclose = (event) => {
         log(`WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`, 'INFO');
         setWsStatus('disconnected');
-        if (protocol === 'wss') {
-          log('WSS failed, falling back to WS', 'WARNING');
-          setTimeout(() => connectWebSocket('ws'), 5000);
+        if (wsRetryCount < MAX_RETRIES) {
+          log(`Retrying WebSocket connection (${wsRetryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+          wsRetryCount++;
+          setTimeout(connectWebSocket, 5000);
         } else {
-          setTimeout(() => connectWebSocket('wss'), 5000);
+          log(`WebSocket connection failed after ${MAX_RETRIES} retries`, 'ERROR');
+          setError('WebSocket connection failed. Please check the server address or try again later.');
+          wsRetryCount = 0;
         }
       };
     };
@@ -154,14 +157,17 @@ const App = () => {
       setError('');
       setSuccess('Logged in successfully!');
       setLoginLoading(false);
+      setRetryCount(0);
     } catch (err) {
-      if (connectionProtocol === 'https') {
-        log('HTTPS login failed, falling back to HTTP', 'WARNING');
-        setConnectionProtocol('http');
-        handleLogin(e);
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying login (${retryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+        setRetryCount(prev => prev + 1);
+        setTimeout(() => handleLogin(e), 5000);
       } else {
-        setError('Failed to login');
+        log(`Error logging in after ${MAX_RETRIES} retries: ${err.message}`, 'ERROR');
+        setError('Failed to login. Please check the server address or try again later.');
         setLoginLoading(false);
+        setRetryCount(0);
       }
     }
   };
@@ -212,14 +218,16 @@ const App = () => {
       setRecipientsFile(null);
       setPreviewRecipients([]);
       e.target.reset();
+      setRetryCount(0);
     } catch (err) {
-      if (connectionProtocol === 'https') {
-        log('HTTPS send failed, falling back to HTTP', 'WARNING');
-        setConnectionProtocol('http');
-        handleSendEmail(e);
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying email send (${retryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+        setRetryCount(prev => prev + 1);
+        setTimeout(() => handleSendEmail(e), 5000);
       } else {
-        log(`Error sending email: ${err.message}`, 'ERROR');
-        setError('Failed to send email');
+        log(`Error sending email after ${MAX_RETRIES} retries: ${err.message}`, 'ERROR');
+        setError('Failed to send email. Please check the server address or try again later.');
+        setRetryCount(0);
       }
     }
   };
@@ -249,15 +257,17 @@ const App = () => {
       log(`Previewed ${data.recipients.length} recipients`);
       setPreviewRecipients(data.recipients);
       setError('');
+      setRetryCount(0);
     } catch (err) {
-      if (connectionProtocol === 'https') {
-        log('HTTPS preview failed, falling back to HTTP', 'WARNING');
-        setConnectionProtocol('http');
-        handlePreview();
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying preview (${retryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+        setRetryCount(prev => prev + 1);
+        setTimeout(handlePreview, 5000);
       } else {
-        log(`Error previewing recipients: ${err.message}`, 'ERROR');
-        setError('Failed to preview recipients');
+        log(`Error previewing recipients after ${MAX_RETRIES} retries: ${err.message}`, 'ERROR');
+        setError('Failed to preview recipients. Please check the server address or try again later.');
         setPreviewRecipients([]);
+        setRetryCount(0);
       }
     }
   };
@@ -269,7 +279,7 @@ const App = () => {
     try {
       const res = await fetch(`${getApiUrl()}/api/sent-emails`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json US-ASCII' },
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
@@ -281,15 +291,17 @@ const App = () => {
       }
       setSentEmails(data.emails);
       setLoadingSent(false);
+      setRetryCount(0);
     } catch (err) {
-      if (connectionProtocol === 'https') {
-        log('HTTPS sent-emails failed, falling back to HTTP', 'WARNING');
-        setConnectionProtocol('http');
-        fetchSentEmails();
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying sent emails fetch (${retryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchSentEmails, 5000);
       } else {
-        setError('Failed to fetch sent emails');
+        setError('Failed to fetch sent emails. Please check the server address or try again later.');
         setSentEmails([]);
         setLoadingSent(false);
+        setRetryCount(0);
       }
     }
   };
@@ -313,15 +325,17 @@ const App = () => {
       }
       setArchivedEmails(data.emails);
       setLoadingArchives(false);
+      setRetryCount(0);
     } catch (err) {
-      if (connectionProtocol === 'https') {
-        log('HTTPS archived-emails failed, falling back to HTTP', 'WARNING');
-        setConnectionProtocol('http');
-        fetchArchivedEmails();
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying archived emails fetch (${retryCount + 1}/${MAX_RETRIES})`, 'WARNING');
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchArchivedEmails, 5000);
       } else {
-        setError('Failed to fetch archived emails');
+        setError('Failed to fetch archived emails. Please check the server address or try again later.');
         setArchivedEmails([]);
         setLoadingArchives(false);
+        setRetryCount(0);
       }
     }
   };
@@ -333,7 +347,7 @@ const App = () => {
     if (isLoggedIn && activeTab === TABS.ARCHIVES) {
       fetchArchivedEmails();
     }
-  }, [isLoggedIn, activeTab, connectionProtocol, serverAddress]);
+  }, [isLoggedIn, activeTab, serverAddress]);
 
   // Handle server address change
   const handleServerChange = (e) => {
@@ -342,7 +356,7 @@ const App = () => {
     setServerAddress(newAddress);
     setShowConfig(false);
     log(`Server address updated to ${newAddress}`);
-    fetchEmails('https'); // Retry with new address
+    fetchEmails();
   };
 
   // UI
@@ -420,11 +434,9 @@ const App = () => {
           <h1 className="text-2xl font-bold">Email Client</h1>
           <div className="flex space-x-4 items-center">
             <span className={`text-sm ${wsStatus === 'connected' ? 'text-green-500' : 'text-red-500'}`}>
-              WebSocket: {wsStatus} ({wsProtocol.toUpperCase()})
+              WebSocket: {wsStatus} (WSS)
             </span>
-            <span className={`text-sm ${connectionProtocol === 'https' ? 'text-green-500' : 'text-yellow-500'}`}>
-              API: {connectionProtocol.toUpperCase()}
-            </span>
+            <span className="text-sm text-green-500">API: HTTPS</span>
             <button
               onClick={() => setShowConfig(true)}
               className="bg-gray-400 text-white px-3 py-1 rounded hover:bg-gray-600"
@@ -465,6 +477,7 @@ const App = () => {
             onClick={() => setActiveTab(TABS.SEND)}
           >
             Send Email
+ Humanos
           </button>
           <button
             className={`px-4 py-2 rounded ${activeTab === TABS.SENT ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}
@@ -533,9 +546,6 @@ const App = () => {
             )}
             {error && <p className="text-red-500">{error}</p>}
             {success && <p className="text-green-500">{success}</p>}
-            {connectionProtocol === 'http' && (
-              <p className="text-yellow-500">Warning: Using insecure HTTP connection. Data may be unencrypted.</p>
-            )}
             <button
               type="submit"
               className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
