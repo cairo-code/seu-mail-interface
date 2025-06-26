@@ -1,6 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import './App.css';
 
+// API Configuration
+const isProduction = window.location.hostname !== 'localhost';
+
+const API_URL = isProduction
+  ? 'https://89.168.74.94:443'  // Production: Always use HTTPS
+  : 'http://localhost:3001';     // Development: Use HTTP
+
+const WS_URL = isProduction
+  ? 'wss://89.168.74.94:443'    // Production: Always use WSS
+  : 'ws://localhost:3001';       // Development: Use WS
+
 const TABS = {
   SEND: 'Send Email',
   SENT: 'Sent Emails',
@@ -39,7 +50,7 @@ const App = () => {
   // Fetch email list on mount
   useEffect(() => {
     log('Fetching email list');
-    fetch('http://89.168.74.94:3001/api/emails')
+    fetch(`${API_URL}/api/emails`)
       .then(res => res.json())
       .then(data => {
         if (data.error) {
@@ -60,8 +71,8 @@ const App = () => {
   useEffect(() => {
     let ws;
     const connectWebSocket = () => {
-      log('Attempting to connect to WebSocket at ws://89.168.74.94:3001');
-      ws = new WebSocket('ws://89.168.74.94:3001');
+      log(`Attempting to connect to WebSocket at ${WS_URL}`);
+      ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
         log('WebSocket connection established');
@@ -108,7 +119,7 @@ const App = () => {
     setError('');
     setLoginLoading(true);
     try {
-      const res = await fetch('http://89.168.74.94:3001/api/login', {
+      const res = await fetch(`${API_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -159,7 +170,7 @@ const App = () => {
     }
     log('Sending email');
     try {
-      const res = await fetch('http://89.168.74.94:3001/api/send', {
+      const res = await fetch(`${API_URL}/api/send`, {
         method: 'POST',
         body: formData,
       });
@@ -193,7 +204,7 @@ const App = () => {
     formData.append('recipients', recipientsFile);
     log('Previewing recipients CSV');
     try {
-      const res = await fetch('http://89.168.74.94:3001/api/preview', {
+      const res = await fetch(`${API_URL}/api/preview`, {
         method: 'POST',
         body: formData,
       });
@@ -219,7 +230,7 @@ const App = () => {
     setLoadingSent(true);
     setError('');
     try {
-      const res = await fetch('http://89.168.74.94:3001/api/sent-emails', {
+      const res = await fetch(`${API_URL}/api/sent-emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -245,7 +256,7 @@ const App = () => {
     setLoadingArchives(true);
     setError('');
     try {
-      const res = await fetch('http://89.168.74.94:3001/api/archived-emails', {
+      const res = await fetch(`${API_URL}/api/archived-emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
