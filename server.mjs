@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import fs from 'fs';
-import http from 'http';
+import https from 'https';
 import { exec } from 'child_process';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
@@ -11,7 +11,7 @@ import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 
 const app = express();
-const PORT = 3001;
+const PORT = 443;
 const upload = multer({ dest: 'uploads/' });
 
 // CORS: Allow all origins with credentials
@@ -126,16 +126,23 @@ const transporter = nodemailer.createTransport({
 // Load users.json synchronously
 const users = JSON.parse(fs.readFileSync('./users.json', 'utf8'));
 
-// Start HTTP server
-const server = http.createServer(app).listen(PORT, () => {
-  console.log(`HTTP Server running on port ${PORT}`);
+// Read SSL certificate and key
+const privateKey = fs.readFileSync('./privkey.pem', 'utf8');
+const certificate = fs.readFileSync('./fullchain.pem', 'utf8');
+const credentials = { key: privateKey, cert: certificate };
+
+// Create HTTPS server
+const httpsServer = https.createServer(credentials, app);
+
+httpsServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`HTTPS/WSS Server running on port ${PORT}`);
 });
 
-// Initialize WebSocket server
+// Initialize WebSocket server on HTTPS
 let wss;
 try {
-  wss = new WebSocketServer({ server });
-  console.log('WebSocket server initialized');
+  wss = new WebSocketServer({ server: httpsServer });
+  console.log('WebSocket server initialized (WSS)');
 } catch (err) {
   console.error(`Failed to initialize WebSocket server: ${err.message}`);
   process.exit(1);
@@ -437,7 +444,6 @@ app.post('/api/archived-emails', express.json(), (req, res) => {
     log(`Archive access denied for username: ${username}`, 'ERROR');
     return res.status(401).json({ error: 'Authentication failed' });
   }
-  
   try {
     const archiveFile = './logs/sent_emails_archive.json';
     if (!fs.existsSync(archiveFile)) {
@@ -452,6 +458,3 @@ app.post('/api/archived-emails', express.json(), (req, res) => {
     res.status(500).json({ error: 'Failed to read archives' });
   }
 });
-
-const API_URL = 'http://89.168.74.94:3001';
-const WS_URL = 'ws://89.168.74.94:3001';

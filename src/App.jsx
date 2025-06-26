@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import './App.css';
 
 // API Configuration
-const API_URL = 'http://89.168.74.94:3001';
-const WS_URL = 'ws://89.168.74.94:3001';
+const DEFAULT_SERVER = '89.168.74.94';
+const HTTP_PORT = 80;
+const HTTPS_PORT = 443;
 
 const TABS = {
   SEND: 'Send Email',
@@ -14,6 +15,9 @@ const TABS = {
 const App = () => {
   const [logs, setLogs] = useState([]);
   const [wsStatus, setWsStatus] = useState('disconnected');
+  const [connectionProtocol, setConnectionProtocol] = useState('https');
+  const [wsProtocol, setWsProtocol] = useState('wss');
+  const [serverAddress, setServerAddress] = useState(DEFAULT_SERVER);
   const [emails, setEmails] = useState([]);
   const [subject, setSubject] = useState('');
   const [attachments, setAttachments] = useState(null);
@@ -31,6 +35,11 @@ const App = () => {
   const [archivedEmails, setArchivedEmails] = useState([]);
   const [loadingArchives, setLoadingArchives] = useState(false);
   const [expandedEmail, setExpandedEmail] = useState(null);
+  const [showConfig, setShowConfig] = useState(false);
+
+  // Dynamic URLs
+  const getApiUrl = () => `${connectionProtocol}://${serverAddress}:${connectionProtocol === 'https' ? HTTPS_PORT : HTTP_PORT}`;
+  const getWsUrl = () => `${wsProtocol}://${serverAddress}:${wsProtocol === 'wss' ? HTTPS_PORT : HTTP_PORT}`;
 
   // Logging function
   const log = (message, level = 'INFO') => {
@@ -40,42 +49,57 @@ const App = () => {
     setLogs(prev => [...prev, formattedMessage]);
   };
 
-  // Fetch email list on mount
+  // Fetch email list
+  const fetchEmails = async (protocol = 'https') => {
+    const url = `${protocol}://${serverAddress}:${protocol === 'https' ? HTTPS_PORT : HTTP_PORT}/api/emails`;
+    log(`Fetching email list from ${url}`);
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) {
+        log(`Failed to fetch email list: ${data.error}`, 'ERROR');
+        throw new Error(data.error);
+      }
+      setEmails(data.emails);
+      log(`Fetched ${data.emails.length} emails`);
+      setConnectionProtocol(protocol);
+      setError('');
+    } catch (err) {
+      if (protocol === 'https') {
+        log('HTTPS failed, falling back to HTTP', 'WARNING');
+        setConnectionProtocol('http');
+        return fetchEmails('http');
+      }
+      log(`Error fetching email list: ${err.message}`, 'ERROR');
+      setError('Failed to load email list');
+    }
+  };
+
   useEffect(() => {
-    log('Fetching email list');
-    fetch(`${API_URL}/api/emails`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.error) {
-          log(`Failed to fetch email list: ${data.error}`, 'ERROR');
-          setError(data.error);
-          return;
-        }
-        setEmails(data.emails);
-        log(`Fetched ${data.emails.length} emails`);
-      })
-      .catch(err => {
-        log(`Error fetching email list: ${err.message}`, 'ERROR');
-        setError('Failed to load email list');
-      });
-  }, []);
+    fetchEmails();
+  }, [serverAddress]);
 
   // WebSocket connection
   useEffect(() => {
     let ws;
-    const connectWebSocket = () => {
-      log(`Attempting to connect to WebSocket at ${WS_URL}`);
-      ws = new WebSocket(WS_URL);
+    const connectWebSocket = (protocol = 'wss') => {
+      const url = `${protocol}://${serverAddress}:${protocol === 'wss' ? HTTPS_PORT : HTTP_PORT}`;
+      log(`Attempting to connect to WebSocket at ${url}`);
+      ws = new WebSocket(url);
 
       ws.onopen = () => {
-        log('WebSocket connection established');
+        log(`WebSocket connection established via ${protocol}`);
         setWsStatus('connected');
+        setWsProtocol(protocol);
+        if (protocol === 'ws') {
+          setError('Using insecure WebSocket (WS). Data may be unencrypted.');
+        }
       };
 
       ws.onmessage = (event) => {
         try {
           const message = event.data;
-          log(`Received message: ${message}`);
+          log(`Received WebSocket message: ${message}`);
         } catch (err) {
           log(`Error processing WebSocket message: ${err.message}`, 'ERROR');
         }
@@ -89,10 +113,12 @@ const App = () => {
       ws.onclose = (event) => {
         log(`WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`, 'INFO');
         setWsStatus('disconnected');
-        setTimeout(() => {
-          log('Attempting to reconnect to WebSocket');
-          connectWebSocket();
-        }, 5000);
+        if (protocol === 'wss') {
+          log('WSS failed, falling back to WS', 'WARNING');
+          setTimeout(() => connectWebSocket('ws'), 5000);
+        } else {
+          setTimeout(() => connectWebSocket('wss'), 5000);
+        }
       };
     };
 
@@ -104,7 +130,7 @@ const App = () => {
         ws.close();
       }
     };
-  }, []);
+  }, [serverAddress]);
 
   // Handle login
   const handleLogin = async (e) => {
@@ -112,7 +138,7 @@ const App = () => {
     setError('');
     setLoginLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/login`, {
+      const res = await fetch(`${getApiUrl()}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -129,8 +155,14 @@ const App = () => {
       setSuccess('Logged in successfully!');
       setLoginLoading(false);
     } catch (err) {
-      setError('Failed to login');
-      setLoginLoading(false);
+      if (connectionProtocol === 'https') {
+        log('HTTPS login failed, falling back to HTTP', 'WARNING');
+        setConnectionProtocol('http');
+        handleLogin(e);
+      } else {
+        setError('Failed to login');
+        setLoginLoading(false);
+      }
     }
   };
 
@@ -163,7 +195,7 @@ const App = () => {
     }
     log('Sending email');
     try {
-      const res = await fetch(`${API_URL}/api/send`, {
+      const res = await fetch(`${getApiUrl()}/api/send`, {
         method: 'POST',
         body: formData,
       });
@@ -181,8 +213,14 @@ const App = () => {
       setPreviewRecipients([]);
       e.target.reset();
     } catch (err) {
-      log(`Error sending email: ${err.message}`, 'ERROR');
-      setError('Failed to send email');
+      if (connectionProtocol === 'https') {
+        log('HTTPS send failed, falling back to HTTP', 'WARNING');
+        setConnectionProtocol('http');
+        handleSendEmail(e);
+      } else {
+        log(`Error sending email: ${err.message}`, 'ERROR');
+        setError('Failed to send email');
+      }
     }
   };
 
@@ -197,7 +235,7 @@ const App = () => {
     formData.append('recipients', recipientsFile);
     log('Previewing recipients CSV');
     try {
-      const res = await fetch(`${API_URL}/api/preview`, {
+      const res = await fetch(`${getApiUrl()}/api/preview`, {
         method: 'POST',
         body: formData,
       });
@@ -212,18 +250,24 @@ const App = () => {
       setPreviewRecipients(data.recipients);
       setError('');
     } catch (err) {
-      log(`Error previewing recipients: ${err.message}`, 'ERROR');
-      setError('Failed to preview recipients');
-      setPreviewRecipients([]);
+      if (connectionProtocol === 'https') {
+        log('HTTPS preview failed, falling back to HTTP', 'WARNING');
+        setConnectionProtocol('http');
+        handlePreview();
+      } else {
+        log(`Error previewing recipients: ${err.message}`, 'ERROR');
+        setError('Failed to preview recipients');
+        setPreviewRecipients([]);
+      }
     }
   };
 
-  // Fetch sent emails for the logged-in user
+  // Fetch sent emails
   const fetchSentEmails = async () => {
     setLoadingSent(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/api/sent-emails`, {
+      const res = await fetch(`${getApiUrl()}/api/sent-emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -238,9 +282,15 @@ const App = () => {
       setSentEmails(data.emails);
       setLoadingSent(false);
     } catch (err) {
-      setError('Failed to fetch sent emails');
-      setSentEmails([]);
-      setLoadingSent(false);
+      if (connectionProtocol === 'https') {
+        log('HTTPS sent-emails failed, falling back to HTTP', 'WARNING');
+        setConnectionProtocol('http');
+        fetchSentEmails();
+      } else {
+        setError('Failed to fetch sent emails');
+        setSentEmails([]);
+        setLoadingSent(false);
+      }
     }
   };
 
@@ -249,7 +299,7 @@ const App = () => {
     setLoadingArchives(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/api/archived-emails`, {
+      const res = await fetch(`${getApiUrl()}/api/archived-emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -264,9 +314,15 @@ const App = () => {
       setArchivedEmails(data.emails);
       setLoadingArchives(false);
     } catch (err) {
-      setError('Failed to fetch archived emails');
-      setArchivedEmails([]);
-      setLoadingArchives(false);
+      if (connectionProtocol === 'https') {
+        log('HTTPS archived-emails failed, falling back to HTTP', 'WARNING');
+        setConnectionProtocol('http');
+        fetchArchivedEmails();
+      } else {
+        setError('Failed to fetch archived emails');
+        setArchivedEmails([]);
+        setLoadingArchives(false);
+      }
     }
   };
 
@@ -277,8 +333,17 @@ const App = () => {
     if (isLoggedIn && activeTab === TABS.ARCHIVES) {
       fetchArchivedEmails();
     }
-    // eslint-disable-next-line
-  }, [isLoggedIn, activeTab]);
+  }, [isLoggedIn, activeTab, connectionProtocol, serverAddress]);
+
+  // Handle server address change
+  const handleServerChange = (e) => {
+    e.preventDefault();
+    const newAddress = e.target.elements.serverAddress.value;
+    setServerAddress(newAddress);
+    setShowConfig(false);
+    log(`Server address updated to ${newAddress}`);
+    fetchEmails('https'); // Retry with new address
+  };
 
   // UI
   if (!isLoggedIn) {
@@ -316,6 +381,33 @@ const App = () => {
           >
             {loginLoading ? 'Logging in...' : 'Login'}
           </button>
+          <button
+            type="button"
+            onClick={() => setShowConfig(true)}
+            className="w-full bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-600 mt-2"
+          >
+            Configure Server
+          </button>
+          {showConfig && (
+            <div className="mt-4">
+              <form onSubmit={handleServerChange} className="space-y-2">
+                <label className="block text-sm font-medium">Server Address (IPv4/IPv6)</label>
+                <input
+                  type="text"
+                  defaultValue={serverAddress}
+                  name="serverAddress"
+                  className="mt-1 block w-full border rounded p-2"
+                  placeholder="e.g., 89.168.74.94 or [::1]"
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                >
+                  Save
+                </button>
+              </form>
+            </div>
+          )}
         </form>
       </div>
     );
@@ -326,13 +418,47 @@ const App = () => {
       <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6 mt-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">Email Client</h1>
-          <button
-            onClick={handleLogout}
-            className="bg-gray-400 text-white px-3 py-1 rounded hover:bg-gray-600"
-          >
-            Logout
-          </button>
+          <div className="flex space-x-4 items-center">
+            <span className={`text-sm ${wsStatus === 'connected' ? 'text-green-500' : 'text-red-500'}`}>
+              WebSocket: {wsStatus} ({wsProtocol.toUpperCase()})
+            </span>
+            <span className={`text-sm ${connectionProtocol === 'https' ? 'text-green-500' : 'text-yellow-500'}`}>
+              API: {connectionProtocol.toUpperCase()}
+            </span>
+            <button
+              onClick={() => setShowConfig(true)}
+              className="bg-gray-400 text-white px-3 py-1 rounded hover:bg-gray-600"
+            >
+              Config
+            </button>
+            <button
+              onClick={handleLogout}
+              className="bg-gray-400 text-white px-3 py-1 rounded hover:bg-gray-600"
+            >
+              Logout
+            </button>
+          </div>
         </div>
+        {showConfig && (
+          <div className="mb-6">
+            <form onSubmit={handleServerChange} className="space-y-2">
+              <label className="block text-sm font-medium">Server Address (IPv4/IPv6)</label>
+              <input
+                type="text"
+                defaultValue={serverAddress}
+                name="serverAddress"
+                className="mt-1 block w-full border rounded p-2"
+                placeholder="e.g., 89.168.74.94 or [::1]"
+              />
+              <button
+                type="submit"
+                className="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+              >
+                Save
+              </button>
+            </form>
+          </div>
+        )}
         <div className="flex space-x-4 mb-6">
           <button
             className={`px-4 py-2 rounded ${activeTab === TABS.SEND ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}
@@ -407,6 +533,9 @@ const App = () => {
             )}
             {error && <p className="text-red-500">{error}</p>}
             {success && <p className="text-green-500">{success}</p>}
+            {connectionProtocol === 'http' && (
+              <p className="text-yellow-500">Warning: Using insecure HTTP connection. Data may be unencrypted.</p>
+            )}
             <button
               type="submit"
               className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
@@ -425,7 +554,7 @@ const App = () => {
             ) : (
               <ul className="border rounded p-2 max-h-60 overflow-y-auto bg-gray-50">
                 {sentEmails.map((line, idx) => (
-                  <li key={idx} className="py-1 text-sm font-mono">{line}</li>
+                  <li key={idx} className="text-sm font-mono">{line}</li>
                 ))}
               </ul>
             )}
