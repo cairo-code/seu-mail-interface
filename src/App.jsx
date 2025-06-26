@@ -5,12 +5,12 @@ import './App.css';
 const isProduction = window.location.hostname !== 'localhost';
 
 const API_URL = isProduction
-  ? 'https://89.168.74.94:443'  // Production: Always use HTTPS
-  : 'http://localhost:3001';     // Development: Use HTTP
+  ? 'https://89.168.74.94'  // Production: HTTPS, no port
+  : 'http://localhost:3001';     // Development: HTTP
 
 const WS_URL = isProduction
-  ? 'wss://89.168.74.94:443'    // Production: Always use WSS
-  : 'ws://localhost:3001';       // Development: Use WS
+  ? 'wss://89.168.74.94'    // Production: WSS, no port
+  : 'ws://localhost:3001';       // Development: WS
 
 const TABS = {
   SEND: 'Send Email',

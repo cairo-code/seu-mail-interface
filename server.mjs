@@ -9,18 +9,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 import http from 'http';
-import https from 'https';
 
 const app = express();
 const PORT = 3001;
-const HTTPS_PORT = 443;
 const upload = multer({ dest: 'uploads/' });
-
-// SSL Certificate configuration
-const sslOptions = {
-  key: fs.readFileSync('./ssl/private.key'),
-  cert: fs.readFileSync('./ssl/certificate.crt')
-};
 
 // Configure CORS for Vercel deployment
 const corsOptions = {
@@ -29,7 +21,7 @@ const corsOptions = {
     'https://seu-mail-interface-git-main-freddys-projects.vercel.app',
     'https://seu-mail-interface-freddys-projects.vercel.app',
     'http://localhost:3000',
-    'http://localhost:5173'  // Vite dev server
+    'http://localhost:5173'
   ],
   methods: ['GET', 'POST'],
   credentials: true,
@@ -142,29 +134,23 @@ const transporter = nodemailer.createTransport({
 // Load users.json synchronously
 const users = JSON.parse(fs.readFileSync('./users.json', 'utf8'));
 
-// Start both HTTP and HTTPS servers
-let httpServer, httpsServer;
+// Start HTTP server only (Nginx will handle HTTPS)
+let server;
 try {
-  // HTTP server (for development)
-  httpServer = http.createServer(app).listen(PORT, () => {
+  server = http.createServer(app).listen(PORT, () => {
     log(`HTTP Server running on http://localhost:${PORT}`);
-  });
-
-  // HTTPS server (for production)
-  httpsServer = https.createServer(sslOptions, app).listen(HTTPS_PORT, () => {
-    log(`HTTPS Server running on https://89.168.74.94:${HTTPS_PORT}`);
+    log('Production HTTPS is handled by Nginx reverse proxy.');
   });
 } catch (err) {
-  log(`Failed to start servers: ${err.message}`, 'ERROR');
+  log(`Failed to start server: ${err.message}`, 'ERROR');
   process.exit(1);
 }
 
-// Initialize WebSocket server with specific origin check
+// Initialize WebSocket server with origin check
 let wss;
 try {
-  // Create WebSocket server on HTTPS server for secure connections
   wss = new WebSocketServer({ 
-    server: httpsServer,
+    server,
     verifyClient: ({ origin }) => {
       const allowedOrigins = [
         'https://seu-mail-interface.vercel.app',
@@ -176,19 +162,9 @@ try {
       return allowedOrigins.includes(origin);
     }
   });
-  log('WebSocket server initialized with SSL and origin verification');
-
-  // Also create WebSocket server on HTTP for development
-  const wssHttp = new WebSocketServer({ 
-    server: httpServer,
-    verifyClient: ({ origin }) => {
-      const devOrigins = ['http://localhost:3000', 'http://localhost:5173'];
-      return devOrigins.includes(origin);
-    }
-  });
-  log('Development WebSocket server initialized');
+  log('WebSocket server initialized with origin verification');
 } catch (err) {
-  log(`Failed to initialize WebSocket servers: ${err.message}`, 'ERROR');
+  log(`Failed to initialize WebSocket server: ${err.message}`, 'ERROR');
   process.exit(1);
 }
 
