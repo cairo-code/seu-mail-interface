@@ -5,12 +5,12 @@ import './App.css';
 const isProduction = window.location.hostname !== 'localhost';
 
 const API_URL = isProduction
-  ? 'https://89.168.74.94'  // Production: HTTPS, no port
-  : 'http://localhost:3001';     // Development: HTTP
+  ? 'https://seu-mail-server-api.cairo-code.site'
+  : 'http://localhost:3001';
 
 const WS_URL = isProduction
-  ? 'wss://89.168.74.94'    // Production: WSS, no port
-  : 'ws://localhost:3001';       // Development: WS
+  ? 'wss://seu-mail-server-api.cairo-code.site'
+  : 'ws://localhost:3001';
 
 const TABS = {
   SEND: 'Send Email',
