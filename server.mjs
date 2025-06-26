@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import fs from 'fs';
-import https from 'https';
+import http from 'http';
 import { exec } from 'child_process';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
@@ -11,7 +11,7 @@ import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
 
 const app = express();
-const PORT = 443;
+const PORT = 3001;
 const upload = multer({ dest: 'uploads/' });
 
 // CORS: Allow all origins with credentials
@@ -126,15 +126,9 @@ const transporter = nodemailer.createTransport({
 // Load users.json synchronously
 const users = JSON.parse(fs.readFileSync('./users.json', 'utf8'));
 
-// SSL options
-const sslOptions = {
-  key: fs.readFileSync('/etc/letsencrypt/live/seu-mail-server-api.cairo-code.site/privkey.pem'),
-  cert: fs.readFileSync('/etc/letsencrypt/live/seu-mail-server-api.cairo-code.site/fullchain.pem')
-};
-
-// Start HTTPS server
-const server = https.createServer(sslOptions, app).listen(PORT, () => {
-  console.log(`HTTPS Server running on port ${PORT}`);
+// Start HTTP server
+const server = http.createServer(app).listen(PORT, () => {
+  console.log(`HTTP Server running on port ${PORT}`);
 });
 
 // Initialize WebSocket server
@@ -149,25 +143,32 @@ try {
 
 // WebSocket event handlers
 wss.on('connection', (ws, req) => {
-  log(`[WS-CONNECT] New WebSocket client from ${req.socket.remoteAddress}`);
-  
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const connectTime = new Date().toISOString();
+  log(`[WS-CONNECT] New WebSocket client from ${clientIp} at ${connectTime}`);
+  log(`[WS-CONNECT] Request headers: ${JSON.stringify(req.headers)}`);
+  log(`[WS-CONNECT] Total connected clients: ${wss.clients.size}`);
+
   ws.on('message', (message) => {
-    log(`[WS-MESSAGE] ${req.socket.remoteAddress}: ${message}`);
+    const msgSize = Buffer.byteLength(message);
+    log(`[WS-MESSAGE] ${clientIp}: Received message of size ${msgSize} bytes`);
     try {
       const data = message.toString();
-      log(`Received WebSocket message: ${data}`);
+      log(`[WS-MESSAGE] ${clientIp}: Content: ${data}`);
       broadcastLog(`Client message: ${data}`);
     } catch (err) {
-      log(`Error processing WebSocket message: ${err.message}`, 'ERROR');
+      log(`[WS-MESSAGE-ERROR] ${clientIp}: Error processing message: ${err.stack || err.message}`, 'ERROR');
     }
   });
 
   ws.on('error', (error) => {
-    log(`[WS-ERROR] ${req.socket.remoteAddress}: ${error.message}`);
+    log(`[WS-ERROR] ${clientIp}: ${error.stack || error.message}`);
   });
 
   ws.on('close', (code, reason) => {
-    log(`[WS-CLOSE] ${req.socket.remoteAddress} (code: ${code}, reason: ${reason})`);
+    const disconnectTime = new Date().toISOString();
+    log(`[WS-CLOSE] ${clientIp} at ${disconnectTime} (code: ${code}, reason: ${reason || 'none'})`);
+    log(`[WS-CLOSE] Total connected clients: ${wss.clients.size}`);
   });
 });
 
@@ -451,3 +452,6 @@ app.post('/api/archived-emails', express.json(), (req, res) => {
     res.status(500).json({ error: 'Failed to read archives' });
   }
 });
+
+const API_URL = 'http://89.168.74.94:3001';
+const WS_URL = 'ws://89.168.74.94:3001';

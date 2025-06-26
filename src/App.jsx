@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import './App.css';
 
 // API Configuration
-const API_URL = 'https://89.168.74.94';
-const WS_URL = 'wss://89.168.74.94';
+const API_URL = 'http://89.168.74.94:3001';
+const WS_URL = 'ws://89.168.74.94:3001';
 
 const TABS = {
   SEND: 'Send Email',
