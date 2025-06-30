@@ -8,7 +8,8 @@ const HTTPS_PORT = 443;
 const TABS = {
   SEND: 'Send Email',
   SENT: 'Sent Emails',
-  ARCHIVES: 'Email Archives'
+  ARCHIVES: 'Email Archives',
+  QUEUE: 'Queue Status',
 };
 
 const App = () => {
@@ -35,6 +36,8 @@ const App = () => {
   const [showConfig, setShowConfig] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const MAX_RETRIES = 3;
+  const [queueStatus, setQueueStatus] = useState(null);
+  const [loadingQueue, setLoadingQueue] = useState(false);
 
   // Dynamic URLs
   const getApiUrl = () => `https://${serverAddress}:${HTTPS_PORT}`;
@@ -340,6 +343,30 @@ const App = () => {
     }
   };
 
+  // Fetch queue status
+  const fetchQueueStatus = async () => {
+    setLoadingQueue(true);
+    try {
+      const res = await fetch(`${getApiUrl()}/api/queue`);
+      const data = await res.json();
+      setQueueStatus(data);
+      setLoadingQueue(false);
+    } catch (err) {
+      setQueueStatus(null);
+      setLoadingQueue(false);
+    }
+  };
+
+  // Auto-refresh queue status when tab is active
+  useEffect(() => {
+    let interval;
+    if (activeTab === TABS.QUEUE) {
+      fetchQueueStatus();
+      interval = setInterval(fetchQueueStatus, 5000);
+    }
+    return () => interval && clearInterval(interval);
+  }, [activeTab, serverAddress]);
+
   useEffect(() => {
     if (isLoggedIn && activeTab === TABS.SENT) {
       fetchSentEmails();
@@ -490,6 +517,12 @@ const App = () => {
           >
             Archives
           </button>
+          <button
+            className={`px-4 py-2 rounded ${activeTab === TABS.QUEUE ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}
+            onClick={() => setActiveTab(TABS.QUEUE)}
+          >
+            Queue Status
+          </button>
         </div>
         {activeTab === TABS.SEND && (
           <form onSubmit={handleSendEmail} className="space-y-4">
@@ -620,6 +653,58 @@ const App = () => {
               </div>
             )}
             {error && <p className="text-red-500 mt-2">{error}</p>}
+          </div>
+        )}
+        {activeTab === TABS.QUEUE && (
+          <div>
+            <h3 className="text-lg font-semibold mb-2">Email Queue Status</h3>
+            {loadingQueue ? (
+              <p>Loading queue status...</p>
+            ) : queueStatus ? (
+              <div className="space-y-4">
+                <div>
+                  <strong>Pending:</strong> {queueStatus.pending.length} | <strong>Processing:</strong> {queueStatus.processing.length} | <strong>Queue Length:</strong> {queueStatus.queueLength}
+                </div>
+                <div>
+                  <h4 className="font-semibold">Pending Jobs</h4>
+                  <ul className="border rounded p-2 max-h-32 overflow-y-auto bg-gray-50">
+                    {queueStatus.pending.map(job => (
+                      <li key={job.jobId} className="text-xs">{job.jobId}: {job.recipient} ({job.subject}) enqueued at {new Date(job.enqueuedAt).toLocaleTimeString()}</li>
+                    ))}
+                    {queueStatus.pending.length === 0 && <li className="text-xs">None</li>}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold">Processing</h4>
+                  <ul className="border rounded p-2 max-h-32 overflow-y-auto bg-gray-50">
+                    {queueStatus.processing.map(job => (
+                      <li key={job.jobId} className="text-xs">{job.jobId}: {job.recipient} ({job.subject}) started at {new Date(job.startedAt).toLocaleTimeString()}</li>
+                    ))}
+                    {queueStatus.processing.length === 0 && <li className="text-xs">None</li>}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold">Last Sent</h4>
+                  <ul className="border rounded p-2 max-h-32 overflow-y-auto bg-gray-50">
+                    {queueStatus.lastSent.map(job => (
+                      <li key={job.jobId} className="text-xs">{job.jobId}: {job.recipient} ({job.subject}) sent at {new Date(job.sentAt).toLocaleTimeString()}</li>
+                    ))}
+                    {queueStatus.lastSent.length === 0 && <li className="text-xs">None</li>}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold">Errors</h4>
+                  <ul className="border rounded p-2 max-h-32 overflow-y-auto bg-gray-50">
+                    {queueStatus.errors.map(job => (
+                      <li key={job.jobId} className="text-xs text-red-500">{job.jobId}: {job.recipient} ({job.subject}) error: {job.error}</li>
+                    ))}
+                    {queueStatus.errors.length === 0 && <li className="text-xs">None</li>}
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              <p>Queue status unavailable.</p>
+            )}
           </div>
         )}
         <div className="mt-6">
